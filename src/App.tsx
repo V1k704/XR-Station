@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { XRLogo } from './components/Brand/XRLogo'
 
 type AppState = {
@@ -1654,6 +1655,7 @@ function App() {
         </div>
       )}
       {toast && <div className="toast">{toast}</div>}
+      <Analytics />
     </div>
   )
 }
