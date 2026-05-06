@@ -51,8 +51,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = (req.body ?? {}) as AnthropicRequest
 
   // Prefer OpenRouter if configured (cost-friendly multi-provider gateway).
-  const openRouterKey = process.env.OPENROUTER_API_KEY
-  if (openRouterKey) {
+  // OPENROUTER_API_KEY supports multiple comma-separated keys for failover.
+  const openRouterKeys = (process.env.OPENROUTER_API_KEY ?? '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean)
+
+  if (openRouterKeys.length > 0) {
     const requestedModel = typeof body.model === 'string' ? body.model.trim() : ''
     const envModels = (process.env.OPENROUTER_MODELS ?? process.env.OPENROUTER_MODEL ?? '')
       .split(',')
@@ -68,32 +73,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let lastStatus = 502
     let lastData: unknown = { error: 'OpenRouter call failed' }
-    for (const model of models) {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${openRouterKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: body.max_tokens ?? 400,
-          temperature: body.temperature ?? 0.3,
-          stream: false,
-          messages: toOpenRouterMessages(body.messages),
-        }),
-      })
 
-      const data = await response.json()
-      if (response.ok) {
-        const text = data?.choices?.[0]?.message?.content ?? ''
-        return res.status(200).json(anthropicLikeFromOpenRouter(model, String(text)))
-      }
+    // Try each key; for each key try each model until one succeeds
+    for (const key of openRouterKeys) {
+      for (const model of models) {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: body.max_tokens ?? 400,
+            temperature: body.temperature ?? 0.3,
+            stream: false,
+            messages: toOpenRouterMessages(body.messages),
+          }),
+        })
 
-      lastStatus = response.status
-      lastData = data
-      if (!shouldTryNextModel(response.status)) {
-        return res.status(response.status).json(data)
+        const data = await response.json()
+        if (response.ok) {
+          const text = data?.choices?.[0]?.message?.content ?? ''
+          return res.status(200).json(anthropicLikeFromOpenRouter(model, String(text)))
+        }
+
+        lastStatus = response.status
+        lastData = data
+        if (!shouldTryNextModel(response.status)) {
+          return res.status(response.status).json(data)
+        }
       }
     }
 
