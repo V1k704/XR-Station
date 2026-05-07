@@ -252,12 +252,50 @@ function App() {
   const [authErr, setAuthErr] = useState('')
   const [physPreview, setPhysPreview] = useState<{ str: number; dex: number; con: number } | null>(null)
   const [mentalPreview, setMentalPreview] = useState<{ int: number; wis: number; cha: number } | null>(null)
+  const [cloudSynced, setCloudSynced] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // On mount: hydrate from Supabase cloud state (localStorage is already loaded as fast fallback)
+  useEffect(() => {
+    fetch(`/api/state?username=${encodeURIComponent(APP_USERNAME)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data?.state) return
+        const cloud = data.state as AppState
+        // Merge cloud into local, preferring the state with more recent activity
+        const localTime = new Date(s.lastActivityAt ?? 0).getTime()
+        const cloudTime = new Date(cloud.lastActivityAt ?? 0).getTime()
+        if (cloudTime > localTime) {
+          const merged: AppState = {
+            ...DEF,
+            ...cloud,
+            lab: { ...DEF.lab, ...(cloud.lab ?? {}) },
+            ai: { ...DEF.ai, ...(cloud.ai ?? {}) },
+            github: { ...DEF.github, ...(cloud.github ?? {}) },
+            sleep: { ...DEF.sleep, ...(cloud.sleep ?? {}) },
+            roadmap: { ...DEF.roadmap, ...(cloud.roadmap ?? {}) },
+            quests: { ...DEF.quests, ...(cloud.quests ?? {}) },
+            enema: { ...DEF.enema, ...(cloud.enema ?? {}) },
+          }
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+          setS(merged)
+        }
+        setCloudSynced(true)
+      })
+      .catch(() => setCloudSynced(true))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const save = (n: AppState) => {
     n.lastActivityAt = new Date().toISOString()
     localStorage.setItem(STORAGE_KEY, JSON.stringify(n))
     setS(n)
+    // Async cloud sync — fire-and-forget, errors are silently swallowed
+    fetch('/api/state', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: APP_USERNAME, state: n }),
+    }).catch(() => undefined)
   }
   const showToast = (msg: string) => {
     setToast(msg)
