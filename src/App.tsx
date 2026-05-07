@@ -135,26 +135,11 @@ const DEF: AppState = {
 }
 
 function load(): AppState {
-  const current = localStorage.getItem(STORAGE_KEY)
-  if (current) {
-    const parsed = JSON.parse(current)
-    return {
-      ...DEF,
-      ...parsed,
-      lab: { ...DEF.lab, ...(parsed.lab ?? {}) },
-      ai: { ...DEF.ai, ...(parsed.ai ?? {}) },
-      github: { ...DEF.github, ...(parsed.github ?? {}) },
-      sleep: { ...DEF.sleep, ...(parsed.sleep ?? {}) },
-      roadmap: { ...DEF.roadmap, ...(parsed.roadmap ?? {}) },
-      quests: { ...DEF.quests, ...(parsed.quests ?? {}) },
-      enema: { ...DEF.enema, ...(parsed.enema ?? {}) },
-    }
-  }
-  for (const key of OLD_KEYS) {
-    const old = localStorage.getItem(key)
-    if (old) {
-      const parsed = JSON.parse(old)
-      const migrated = {
+  try {
+    const current = localStorage.getItem(STORAGE_KEY)
+    if (current) {
+      const parsed = JSON.parse(current)
+      return {
         ...DEF,
         ...parsed,
         lab: { ...DEF.lab, ...(parsed.lab ?? {}) },
@@ -165,10 +150,30 @@ function load(): AppState {
         quests: { ...DEF.quests, ...(parsed.quests ?? {}) },
         enema: { ...DEF.enema, ...(parsed.enema ?? {}) },
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated))
-      localStorage.removeItem(key)
-      return migrated
     }
+    for (const key of OLD_KEYS) {
+      const old = localStorage.getItem(key)
+      if (old) {
+        const parsed = JSON.parse(old)
+        const migrated = {
+          ...DEF,
+          ...parsed,
+          lab: { ...DEF.lab, ...(parsed.lab ?? {}) },
+          ai: { ...DEF.ai, ...(parsed.ai ?? {}) },
+          github: { ...DEF.github, ...(parsed.github ?? {}) },
+          sleep: { ...DEF.sleep, ...(parsed.sleep ?? {}) },
+          roadmap: { ...DEF.roadmap, ...(parsed.roadmap ?? {}) },
+          quests: { ...DEF.quests, ...(parsed.quests ?? {}) },
+          enema: { ...DEF.enema, ...(parsed.enema ?? {}) },
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated))
+        localStorage.removeItem(key)
+        return migrated
+      }
+    }
+  } catch {
+    // corrupted storage — start fresh
+    try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
   }
   return DEF
 }
