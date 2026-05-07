@@ -81,6 +81,16 @@ type EnemaReport = {
   failedQuests: number
 }
 
+type StatusServiceResult = {
+  id: string
+  label: string
+  category: 'ai' | 'database' | 'platform'
+  ok: boolean
+  latencyMs: number
+  detail?: string
+}
+type StatusReport = { checkedAt: string; services: StatusServiceResult[] }
+
 type Stage = 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert' | 'Elite'
 
 type RoadNode = {
@@ -253,6 +263,9 @@ function App() {
   const [physPreview, setPhysPreview] = useState<{ str: number; dex: number; con: number } | null>(null)
   const [mentalPreview, setMentalPreview] = useState<{ int: number; wis: number; cha: number } | null>(null)
   const [cloudSynced, setCloudSynced] = useState(false)
+  const [statusOpen, setStatusOpen] = useState(false)
+  const [statusData, setStatusData] = useState<StatusReport | null>(null)
+  const [statusBusy, setStatusBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // On mount: hydrate from Supabase cloud state (localStorage is already loaded as fast fallback)
@@ -300,6 +313,19 @@ function App() {
   const showToast = (msg: string) => {
     setToast(msg)
     window.setTimeout(() => setToast(''), 2200)
+  }
+
+  const checkSystemStatus = async () => {
+    setStatusBusy(true)
+    try {
+      const r = await fetch('/api/status')
+      if (!r.ok) throw new Error('status-failed')
+      setStatusData(await r.json() as StatusReport)
+    } catch {
+      showToast('Status check failed')
+    } finally {
+      setStatusBusy(false)
+    }
   }
   const xp = useMemo(() => Math.round(s.python.xp + s.htb.machines * 15 + s.htb.points * 0.1 + s.lab.milestones.filter(Boolean).length * 30 + s.ctf.points * 0.5 + s.ai.xp + s.certs.filter((c) => c.earned).length * 100 + s.github.repos * 2), [s])
   const level = Math.max(1, Math.floor(xp / 100) + 1)
@@ -1691,6 +1717,89 @@ function App() {
           </div>
         </div>
       )}
+      {/* ── floating status button ── */}
+      <button
+        id="status-check-btn"
+        onClick={() => { setStatusOpen(true); if (!statusData) checkSystemStatus() }}
+        style={{ position:'fixed', bottom:'24px', right:'24px', zIndex:1000, background:'linear-gradient(135deg,#0f0f1a,#1a1a2e)', border:'1px solid rgba(201,168,76,0.45)', color:'#c9a84c', padding:'10px 18px', borderRadius:'8px', fontFamily:'monospace', fontSize:'0.78rem', cursor:'pointer', letterSpacing:'0.12em', boxShadow:'0 4px 24px rgba(0,0,0,0.6)', transition:'box-shadow 0.2s' }}
+      >
+        ◈ SYSTEM STATUS
+      </button>
+
+      {/* ── status modal ── */}
+      {statusOpen && (
+        <div
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', backdropFilter:'blur(8px)', zIndex:9000, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setStatusOpen(false) }}
+        >
+          <div style={{ background:'linear-gradient(160deg,#0b0b14 0%,#141426 100%)', border:'1px solid rgba(201,168,76,0.22)', borderRadius:'16px', padding:'28px', width:'min(620px,95vw)', maxHeight:'85vh', overflowY:'auto', boxShadow:'0 24px 80px rgba(0,0,0,0.9)' }}>
+            {/* header */}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'24px' }}>
+              <div>
+                <div style={{ color:'#c9a84c', fontFamily:'monospace', fontSize:'1.05rem', fontWeight:'bold', letterSpacing:'0.2em' }}>◈ SYSTEM STATUS</div>
+                <div style={{ color:'#444', fontSize:'0.7rem', fontFamily:'monospace', marginTop:'4px' }}>
+                  {statusBusy ? '⟳ Pinging all services…' : statusData ? `Last checked: ${new Date(statusData.checkedAt).toLocaleTimeString()}` : 'Ready to check'}
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:'8px' }}>
+                <button onClick={checkSystemStatus} disabled={statusBusy} style={{ background:'rgba(201,168,76,0.1)', border:'1px solid rgba(201,168,76,0.3)', color:'#c9a84c', padding:'6px 14px', borderRadius:'6px', fontFamily:'monospace', fontSize:'0.73rem', cursor: statusBusy ? 'not-allowed':'pointer', opacity: statusBusy ? 0.5:1 }}>
+                  {statusBusy ? '⟳' : '↻ Recheck'}
+                </button>
+                <button onClick={() => setStatusOpen(false)} style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color:'#888', padding:'6px 12px', borderRadius:'6px', fontFamily:'monospace', fontSize:'0.73rem', cursor:'pointer' }}>✕</button>
+              </div>
+            </div>
+
+            {/* empty states */}
+            {!statusData && !statusBusy && <div style={{ textAlign:'center', color:'#444', fontFamily:'monospace', padding:'40px 0', fontSize:'0.85rem' }}>Press Recheck to run diagnostics</div>}
+            {statusBusy && !statusData && <div style={{ textAlign:'center', color:'#c9a84c', fontFamily:'monospace', padding:'40px 0', fontSize:'0.85rem' }}>⟳ Pinging services, please wait…</div>}
+
+            {/* service rows */}
+            {statusData && (() => {
+              const catMeta: Record<string, { label: string; color: string }> = {
+                ai:       { label:'🤖  AI AGENTS', color:'#a987ff' },
+                database: { label:'🗄   DATABASE',  color:'#4bc47e' },
+                platform: { label:'🔗  PLATFORMS',  color:'#6dc1ff' },
+              }
+              return (
+                <>
+                  {(['ai','database','platform'] as const).map((cat) => {
+                    const svcs = statusData.services.filter((sv) => sv.category === cat)
+                    if (!svcs.length) return null
+                    const { label: catLabel, color: catColor } = catMeta[cat]
+                    return (
+                      <div key={cat} style={{ marginBottom:'20px' }}>
+                        <div style={{ color:catColor, fontSize:'0.63rem', letterSpacing:'0.25em', fontFamily:'monospace', marginBottom:'10px', opacity:0.85 }}>{catLabel}</div>
+                        {svcs.map((svc) => (
+                          <div key={svc.id} style={{ display:'flex', alignItems:'center', gap:'14px', padding:'11px 16px', background: svc.ok ? 'rgba(75,196,126,0.04)':'rgba(255,80,80,0.04)', border:`1px solid ${svc.ok ? 'rgba(75,196,126,0.18)':'rgba(255,80,80,0.18)'}`, borderRadius:'10px', marginBottom:'8px' }}>
+                            <div style={{ width:'10px', height:'10px', borderRadius:'50%', background: svc.ok ? '#4bc47e':'#ff5050', boxShadow: svc.ok ? '0 0 10px rgba(75,196,126,0.9)':'0 0 10px rgba(255,80,80,0.9)', flexShrink:0 }} />
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <div style={{ color: svc.ok ? '#e8ffe8':'#ffe8e8', fontFamily:'monospace', fontSize:'0.88rem', fontWeight:'bold' }}>{svc.label}</div>
+                              {svc.detail && <div style={{ color:'#555', fontSize:'0.69rem', fontFamily:'monospace', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{svc.detail}</div>}
+                            </div>
+                            <div style={{ display:'flex', alignItems:'center', gap:'10px', flexShrink:0 }}>
+                              <span style={{ color:'#444', fontSize:'0.69rem', fontFamily:'monospace' }}>{svc.latencyMs}ms</span>
+                              <span style={{ padding:'3px 10px', borderRadius:'5px', fontSize:'0.67rem', fontFamily:'monospace', fontWeight:'bold', letterSpacing:'0.08em', background: svc.ok ? 'rgba(75,196,126,0.15)':'rgba(255,80,80,0.15)', color: svc.ok ? '#4bc47e':'#ff5050', border:`1px solid ${svc.ok ? 'rgba(75,196,126,0.35)':'rgba(255,80,80,0.35)'}` }}>
+                                {svc.ok ? '● ONLINE' : '● OFFLINE'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })}
+                  {/* summary bar */}
+                  <div style={{ marginTop:'8px', padding:'11px 16px', background:'rgba(255,255,255,0.02)', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.06)', display:'flex', justifyContent:'space-between', fontFamily:'monospace', fontSize:'0.74rem' }}>
+                    <span style={{ color:'#4bc47e' }}>● {statusData.services.filter((sv) => sv.ok).length} Online</span>
+                    <span style={{ color:'#ff5050' }}>● {statusData.services.filter((sv) => !sv.ok).length} Offline</span>
+                    <span style={{ color:'#555' }}>{statusData.services.length} total services</span>
+                  </div>
+                </>
+              )
+            })()}
+          </div>
+        </div>
+      )}
+
       {toast && <div className="toast">{toast}</div>}
     </div>
   )
